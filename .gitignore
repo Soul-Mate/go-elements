@@ -1,0 +1,7 @@
+.idea
+go-linux-ppc64-bootstrap
+go-linux-ppc64-bootstrap.tbz
+go/bin
+go/pkg
+*.out
+*.bin

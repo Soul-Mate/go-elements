@@ -1,0 +1,8 @@
+{
+    "go.goroot": "/mnt/d/Workspace/github.com/Soul-Mate/go-elements/go",
+    "go.gopath": "/mnt/d/Workspace/github.com/Soul-Mate/go-elements/go",
+    "go.inferGopath": false,
+    "go.useLanguageServer": false,
+    "go.toolsGopath": "/home/xyc/.go/",
+    "editor.formatOnSave": true
+}
