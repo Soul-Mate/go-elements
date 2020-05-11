@@ -139,9 +139,13 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 
 // 实现的atomic.Value Load, 对应entry
 func (e *entry) load() (value interface{}, ok bool) {
+	// 从atomic.Value中加载出对应的指针
 	p := atomic.LoadPointer(&e.p)
-	// 获取值失败, p本身不存在
-	// 或 p处于expunged, 只会出现在read中
+
+	// 这里会在执行一次检查, 为什么呢？
+	// 因为在Load()方法中, 仅仅是确定了 key对应的entry在哪里,
+	// 如果entry在dirty中, 则会通过这个检查, 但如果在read.m中的entry,
+	// 根据sync.Map的设计, entry可能处于nil或expunged的状态 (表示不存在或标记为删除)
 	if p == nil || p == expunged {
 		return nil, false
 	}
