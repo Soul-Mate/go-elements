@@ -160,7 +160,7 @@ func (m *Map) Store(key, value interface{}) {
 		return
 	}
 
-	// here, tryStroe失败, read.m中的entry被改为expunged状态了
+	// here, tryStroe失败, read.m中的entry被标记为expunged
 	m.mu.Lock()
 	read, _ = m.read.Load().(readOnly)
 
@@ -175,7 +175,7 @@ func (m *Map) Store(key, value interface{}) {
 			m.dirty[key] = e
 		}
 
-		// update
+		// update or store
 		e.storeLocked(&value)
 	} else if e, ok := m.dirty[key]; ok {
 		// here, double-check后还是在read中找不到对应的新值
@@ -209,12 +209,12 @@ func (m *Map) Store(key, value interface{}) {
 func (e *entry) tryStore(i *interface{}) bool {
 	for {
 		p := atomic.LoadPointer(&e.p)
-		// update read.m中的entry时, read.m对应的entry是expunged状态,
-		// 表示read.m对应的entry已经拷贝到dirty中了, 因为只有在 dirtyLocked 时,
-		// 才会将entry标记为expunged
+		// read.m中的entry状态为expunged, 不会去Store新的值
 		if p == expunged {
 			return false
 		}
+
+		// 使用CAS操作存储新的值
 		if atomic.CompareAndSwapPointer(&e.p, p, unsafe.Pointer(i)) {
 			return true
 		}
