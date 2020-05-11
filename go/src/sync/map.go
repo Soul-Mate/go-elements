@@ -155,36 +155,34 @@ func (e *entry) load() (value interface{}, ok bool) {
 // Store sets the value for a key.
 func (m *Map) Store(key, value interface{}) {
 	read, _ := m.read.Load().(readOnly)
-	// key存在, 且在read中能获取, 则对此key存储新的值使用CAS
+	// key存在于read.m, tryStore尝试存储新的value,
+	// tryStore成功直接返回
 	if e, ok := read.m[key]; ok && e.tryStore(&value) {
 		return
 	}
 
-	// here, tryStroe失败, read.m中的entry被标记为expunged
+	// tryStroe失败, lock住开始继续操作
 	m.mu.Lock()
+
 	read, _ = m.read.Load().(readOnly)
 
-	// double-check
 	if e, ok := read.m[key]; ok {
-		// here, 将 read.m 拿到的 entry 标记为 unexpunge,
-		// entry为expunged说明被移动到了 dirty,
-		// 这里保证 dirty 中一定存在 expunged 状态的 entry
+		// read.m中有对应的entry, 但被设置为expunged,
+		// 因此不可再read.m中使用了, 这里将entry设置为unexpunge并
+		// 存储到dirty
 		if e.unexpungeLocked() {
 			// The entry was previously expunged, which implies that there is a
 			// non-nil dirty map and this entry is not in it.
 			m.dirty[key] = e
 		}
 
-		// update or store
 		e.storeLocked(&value)
 	} else if e, ok := m.dirty[key]; ok {
-		// here, double-check后还是在read中找不到对应的新值
-		// 同时dirty中有值, 则进行update
+		// read.m中没找到, dirty中找到, 更新dirty中对应的value
 		e.storeLocked(&value)
 	} else {
-		// here,
-		// 这里会把read的数据拷到dirty中做一个映射, 可以看到
-		// 每次store新key的时候,都会做, 目的应该是在store中均摊复杂度
+		// !read.amended 表示dirty为nil,
+		// 需要创建dirty并复制read.m到新的dirty
 		if !read.amended {
 			// We're adding the first new key to the dirty map.
 			// Make sure it is allocated and mark the read-only map as incomplete.
@@ -196,7 +194,8 @@ func (m *Map) Store(key, value interface{}) {
 			m.read.Store(readOnly{m: read.m, amended: true})
 		}
 
-		// 存储
+		// read.amended表示dirty不为nil, 直接将新的
+		// kv存储到dirty中
 		m.dirty[key] = newEntry(value)
 	}
 	m.mu.Unlock()
@@ -312,17 +311,17 @@ func (m *Map) Delete(key interface{}) {
 	e, ok := read.m[key]
 	if !ok && read.amended {
 		m.mu.Lock()
-
+		// double-check
 		read, _ = m.read.Load().(readOnly)
 		e, ok = read.m[key]
 
-		// double-check
 		if !ok && read.amended {
 			// 从dirty删除
 			delete(m.dirty, key)
 		}
 		m.mu.Unlock()
 	}
+	// 从read.m中删除
 	if ok {
 		e.delete()
 	}
@@ -331,9 +330,11 @@ func (m *Map) Delete(key interface{}) {
 func (e *entry) delete() (hadValue bool) {
 	for {
 		p := atomic.LoadPointer(&e.p)
+		// p已经是删除状态
 		if p == nil || p == expunged {
 			return false
 		}
+		// 使用CAS设置p=nil
 		if atomic.CompareAndSwapPointer(&e.p, p, nil) {
 			return true
 		}
@@ -356,6 +357,8 @@ func (m *Map) Range(f func(key, value interface{}) bool) {
 	// If read.amended is false, then read.m satisfies that property without
 	// requiring us to hold m.mu for a long time.
 	read, _ := m.read.Load().(readOnly)
+
+	// 只要read.amended为true, 则dirty中存在数据且数据没有提升到read
 	if read.amended {
 		// m.dirty contains keys not in read.m. Fortunately, Range is already O(N)
 		// (assuming the caller does not break out early), so a call to Range
@@ -363,7 +366,9 @@ func (m *Map) Range(f func(key, value interface{}) bool) {
 		// immediately!
 		m.mu.Lock()
 		read, _ = m.read.Load().(readOnly)
+		// double-check
 		if read.amended {
+			// 拷贝m.dirty
 			read = readOnly{m: m.dirty}
 			m.read.Store(read)
 			m.dirty = nil
@@ -372,6 +377,7 @@ func (m *Map) Range(f func(key, value interface{}) bool) {
 		m.mu.Unlock()
 	}
 
+	// 遍历并传入到user func
 	for k, e := range read.m {
 		v, ok := e.load()
 		if !ok {
@@ -404,7 +410,7 @@ func (m *Map) missLocked() {
 }
 
 func (m *Map) dirtyLocked() {
-	// 仅在dirty才会进行拷贝
+	// 仅在dirty存在时才会进行拷贝
 	if m.dirty != nil {
 		return
 	}
