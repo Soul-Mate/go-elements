@@ -4,7 +4,7 @@ go-elements project 是个人阅读go语言源码的一些总结和思考, 欢�
 
 ### sync
 - [ ] [sync.Cond]()
-- [x] [sync.Map](doc/sync_map.md)
+- [x] [sync.Map](doc/sync/map.md)
 - [ ] [sync.Mutex]()
 - [ ] [sync.Once]()
 - [ ] [sync.Pool]()
